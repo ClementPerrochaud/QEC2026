@@ -66,7 +66,7 @@ def plot_errors_to_syndromes(syndrome_errors, error_proba, syndrome_proba, error
 
 def single_brute_force():
     code = rotated_surface_code(3)
-    file = f"saves/{code.name}"
+    file = f"saves_bf/{code.name}"
     wmax = 6
     g, gc = 1, 1
     t = 1
@@ -154,7 +154,7 @@ def single_brute_force():
 
 def multiple_brute_force():
     code = rotated_surface_code(5)
-    file = f"saves/{code.name}"
+    file = f"saves_bf/{code.name}"
     wmax = 6
     g, gc = 1, 1
     times = np.logspace(-2,0.3,15) # 8 15 22 29 36 43 50
@@ -219,7 +219,7 @@ def multiple_brute_force():
 
 
 def bf_plotplot():
-    file = "saves/LMPZ"
+    file = "saves_bf/LMPZ"
     extension = ""
 
     code, wmax, g, gc, times = np.load(f"{file}/param{extension}.npy", allow_pickle=True)
@@ -281,7 +281,7 @@ def bf_plot_compare1():
     fig, ax = plt.subplots(1,3,figsize=(12,4),dpi=300)
 
     for wmax in range(5,1,-1):
-        file = "saves/LMPZ"
+        file = "saves_bf/LMPZ"
         print(wmax)
 
         code, wmax, g, gc, times = np.load(f"{file}/param_{wmax}.npy", allow_pickle=True)
@@ -320,7 +320,7 @@ def bf_plot_compare1():
 
 def bf_plot_compare2():
     fig, ax = plt.subplots(2,4,figsize=(18,8),dpi=300)
-    file = "saves/3RSC"
+    file = "saves_bf/3RSC"
 
     for wmax in range(9,3,-1):
         print(wmax)
@@ -370,21 +370,22 @@ def bf_plot_compare2():
 
 
 def monte_carlo():
-    code = rotated_surface_code(7)
+    code = rotated_surface_code(5)
     g, gc = 1, 1
     times = np.logspace(-2, 0.3, 50) # 8 15 22 29 36 43 50
     shot = 1000
-    max_weight = 4
+    max_weight = 3
 
     error_rates = []
     finals = []
 
+    decode = MLDecoder(code, get_IXYZ_error_proba(times[0],g,gc), max_weight)
+
     for it,t in enumerate(times):
 
         IXYZ_proba = get_IXYZ_error_proba(t,g,gc)
-        #np.random.seed(42)
-        decode = MLDecoder(code, IXYZ_proba, max_weight)
-        
+        decode.set_noise(IXYZ_proba)
+
         error_rates.append(1-IXYZ_proba[0])
         final = [0,0,0,0]
 
@@ -405,30 +406,76 @@ def monte_carlo():
 
 
 
+def monte_carlo_rsc():
+    distance = 9
+    code = rotated_surface_code(distance)
+    g, gc = 1, 1
+    times = np.logspace(-2, 0.3, 50) # 8 15 22 29 36 43 50
+    shot = 10000
+
+    error_rates = []
+    finals = []
+
+    decode = MWPMDecoder(code, get_IXYZ_error_proba(times[0],g,gc))
+
+    for it,t in enumerate(times):
+
+        IXYZ_proba = get_IXYZ_error_proba(t,g,gc)
+        decode.set_noise(IXYZ_proba)
+
+        error_rates.append(1-IXYZ_proba[0])
+        final = [0,0,0,0]
+
+        for _ in range(shot):
+            err = random_tag(code.n, IXYZ_proba)
+            if err == 0:
+                final[0] += 1
+                continue
+            syn = int(get_syndrome(err, code))
+            cor = decode(syn)
+            res = err ^ cor
+            log = logical(res, code)
+            final[log] += 1
+        
+        finals.append(final)
+        print(f"p = {(1-IXYZ_proba[0]):.3g} \t p' = {(1-final[0]/sum(final)):.3g} \t {final}")
+    np.save(f"saves_mc/RSC/data_{distance}", np.array([error_rates, finals], dtype=object))     
+
+
 ### - - - - - - - - - - - - - - - - - - - - - - -
 
 
 
 def plot_ml():
-    error_rates, finals = np.load("data.npy", allow_pickle=True)
-    finals = np.array([f for f in finals])
-    shot = np.sum((finals[0]))
+    error_rates_3, finals_3 = np.load("saves_mc/rsc/data_3.npy", allow_pickle=True)
+    error_rates_5, finals_5 = np.load("saves_mc/rsc/data_5.npy", allow_pickle=True)
+    error_rates_7, finals_7 = np.load("saves_mc/rsc/data_7.npy", allow_pickle=True)
+    error_rates_9, finals_9 = np.load("saves_mc/rsc/data_9.npy", allow_pickle=True)
+    finals_3 = np.array([f for f in finals_3])
+    finals_5 = np.array([f for f in finals_5])
+    finals_7 = np.array([f for f in finals_7])
+    finals_9 = np.array([f for f in finals_9])
+    shot = np.sum((finals_3[0]))
 
     fig,ax = plt.subplots()
 
-    ax.loglog(error_rates, 1-finals[:,0]/shot, c="black", lw=5,     zorder=13)
+    ax.loglog(error_rates_3, 1-finals_3[:,0]/shot, c="red",    lw=5, zorder=13, label="d=3")
+    ax.loglog(error_rates_5, 1-finals_5[:,0]/shot, c="purple", lw=5, zorder=14, label="d=5")
+    ax.loglog(error_rates_7, 1-finals_7[:,0]/shot, c="blue",   lw=5, zorder=15, label="d=7")
+    ax.loglog(error_rates_9, 1-finals_9[:,0]/shot, c="green",  lw=5, zorder=16, label="d=9")
 
     xlim, ylim = ax.get_xlim(), ax.get_ylim()
     lo, hi = min(xlim[0], ylim[0]), max(xlim[1], ylim[1])
 
-    ax.loglog(error_rates,   finals[:,1]/shot, c="royalblue",       zorder=10)
-    ax.loglog(error_rates,   finals[:,2]/shot, c="red",             zorder=11)
-    ax.loglog(error_rates,   finals[:,3]/shot, c="mediumvioletred", zorder=12)
+    #ax.loglog(error_rates,   finals[:,1]/shot, c="royalblue",       zorder=10)
+    #ax.loglog(error_rates,   finals[:,2]/shot, c="red",             zorder=11)
+    #ax.loglog(error_rates,   finals[:,3]/shot, c="mediumvioletred", zorder=12)
 
     ax.plot([lo, hi], [lo, hi], lw=1.5, ls="--", c="lightgrey", zorder=5, alpha=0.5)
     ax.set_xlim(xlim); ax.set_ylim(ylim)
 
     ax.grid(which='minor', linewidth=0.3, alpha=0.5)
+    ax.legend()
 
     plt.tight_layout()
     plt.show()
@@ -440,5 +487,5 @@ def plot_ml():
 
 
 if __name__ == "__main__":
-    monte_carlo()
-    plot_ml()
+    monte_carlo_rsc()
+    #plot_ml()
