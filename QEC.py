@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib.collections import PolyCollection
 from itertools import combinations, product
+import networkx as nx
 import time
 
 
@@ -473,36 +474,119 @@ def stabilizer_group(code):
 class MLDecoder:
     def __init__(self, code, p_unit, max_weight=None):
         self.code = code
-        self.p_unit = np.asarray(p_unit, dtype=float)
         W = code.n if max_weight is None else min(max(max_weight, 0), code.n)
         if max_weight is None and 4**code.n > 5_000_000:
             raise ValueError(f"exact ML on {code.name} enumerates 4**{code.n} errors; "
                              f"pass max_weight (eg 2-3) for an approximate ML decoder")
-        self.cache = self._build_table(W)             # syndrome -> correction (most probable class)
+        self._enumerate(W)                             # noise-independent -> done once
+        self.set_noise(p_unit)
 
-    def _build_table(self, W):
+    def _enumerate(self, W):
         code, n = self.code, self.code.n
-        errs = get_tags(4, n, W)                       # every error of weight <= W
+        errs = get_tags(4, n, W)                        # every error of weight <= W
         syn  = get_syndrome(errs, code)
-        pr   = get_proba(errs, self.p_unit, n)
-        maskx = int("01"*n, 2)                         # vectorised logical class of each error
+        maskx = int("01"*n, 2)                          # vectorised logical class of each error
         if errs.dtype == object: maskx = np.array(maskx, dtype=object)
         ex, ez = errs & maskx, (errs >> 1) & maskx
         sympv = lambda P: _popcount_parity((ex & ((P >> 1) & maskx)) ^ (ez & (P & maskx)))
         lg = (sympv(int(code.X)) << 1) | sympv(int(code.Z))
-        proba, rep = {}, {}                            # syndrome -> [p per class] / [error per class]
-        for e, s, p, l in zip(errs.tolist(), syn.tolist(), pr.tolist(), lg.tolist()):
-            proba.setdefault(s, [0., 0., 0., 0.])[l] += p
-            r = rep.setdefault(s, [None, None, None, None])
-            if r[l] is None: r[l] = e
-        return {s: rep[s][max((l for l in range(4) if rep[s][l] is not None),
-                              key=lambda l: proba[s][l])] for s in proba}
+        self._dtype = errs.dtype
+        self._groups = {}                               # syndrome -> [(error tag, logical class), ...]
+        for e, s, l in zip(errs.tolist(), syn.tolist(), lg.tolist()):
+            self._groups.setdefault(s, []).append((e, l))
+
+    def set_noise(self, p_unit):
+        ''' re-point the decoder at a new noise model, keeping the enumeration (cheap) '''
+        self.p_unit = np.asarray(p_unit, dtype=float)
+        self.cache = {}
+        return self
 
     def __call__(self, syndrome):
         s = int(syndrome)
-        if s not in self.cache:                        # error heavier than max_weight -> best effort
-            self.cache[s] = _pure_error(s, self.code)
-        return self.cache[s]
+        if s in self.cache: return self.cache[s]
+        group = self._groups.get(s)
+        if group is None:                              # heavier than max_weight -> best effort
+            corr = _pure_error(s, self.code)
+        else:                                          # correct towards the most probable class
+            tags = np.array([e for e, _ in group], dtype=self._dtype)
+            pr   = get_proba(tags, self.p_unit, self.code.n)
+            cls_p, rep = [0., 0., 0., 0.], [None, None, None, None]
+            for (e, l), p in zip(group, pr.tolist()):
+                cls_p[l] += p
+                if rep[l] is None: rep[l] = e
+            best = max((l for l in range(4) if rep[l] is not None), key=lambda l: cls_p[l])
+            corr = rep[best]
+        self.cache[s] = corr
+        return corr
+
+
+class MWPMDecoder:
+    def __init__(self, code, p_unit=None):
+        self.code, self.n, self.m = code, code.n, code.m
+        wX = wZ = 1.0                                        # per-qubit flip weights
+        if p_unit is not None:
+            _, pX, pY, pZ = [float(x) for x in p_unit]
+            if pX + pY > 0: wX = -np.log(pX + pY)           # an X or Y flips the X-part
+            if pZ + pY > 0: wZ = -np.log(pZ + pY)           # a Z or Y flips the Z-part
+        self._Xdec = self._build("Z", wX)                   # Z-stabs detect X errors -> X correction
+        self._Zdec = self._build("X", wZ)                   # X-stabs detect Z errors -> Z correction
+
+    def set_noise(self, p_unit):
+        ''' no-op: with iid noise every edge of a graph has the same weight, so the
+            matching (hence the correction) does not depend on p_unit -> drop-in for MLDecoder '''
+        return self
+
+    def _support(self, g):                                  # grid qubits acted on by generator g
+        return [j for j in range(self.n) if (g >> (2*(self.n-1-j))) & 3]
+
+    def _build(self, stab_type, weight):
+        n, xmask, zmask = self.n, int("01"*self.n, 2), int("10"*self.n, 2)
+        dets = []                                           # (syndrome-bit position, support qubits)
+        for i, g in enumerate(self.code.generators):
+            g = int(g)
+            is_type = (stab_type == "X" and g & zmask == 0) or (stab_type == "Z" and g & xmask == 0)
+            if is_type: dets.append((self.m - 1 - i, self._support(g)))  # get_syndrome: gen i at bit m-1-i
+        H = nx.Graph(); H.add_nodes_from(range(len(dets))); H.add_node("B")
+        qubit_dets = {}
+        for d, (_, sup) in enumerate(dets):
+            for j in sup: qubit_dets.setdefault(j, []).append(d)
+        for j, ds in qubit_dets.items():
+            if   len(ds) == 2: a, b = ds
+            elif len(ds) == 1: a, b = ds[0], "B"            # boundary qubit
+            else: continue                                  # >2 -> not a matching code (skip)
+            if not H.has_edge(a, b) or H[a][b]["weight"] > weight:
+                H.add_edge(a, b, weight=weight, qubit=j)
+        dist, pathq = {}, {}                                # all-pairs shortest paths (+ qubit sets)
+        for a in range(len(dets)):
+            lengths, paths = nx.single_source_dijkstra(H, a, weight="weight")
+            for t, L in lengths.items():
+                dist[(a, t)] = L
+                nodes = paths[t]
+                pathq[(a, t)] = frozenset(H[u][v]["qubit"] for u, v in zip(nodes, nodes[1:]))
+        return {"dets": dets, "D": len(dets), "dist": dist, "pathq": pathq}
+
+    def _match(self, syndrome, dec):
+        lit = [d for d in range(dec["D"]) if (syndrome >> dec["dets"][d][0]) & 1]
+        if not lit: return set()
+        dist, pathq = dec["dist"], dec["pathq"]
+        BIG = 1.0 + sum(dist.get((a, "B"), 0) for a in lit) + sum(dist.get((a, b), 0) for a in lit for b in lit)
+        G = nx.Graph()
+        for ia, a in enumerate(lit):
+            if (a, "B") in dist: G.add_edge(("d", a), ("v", a), weight=BIG - dist[(a, "B")])
+            for b in lit[ia+1:]:
+                if (a, b) in dist: G.add_edge(("d", a), ("d", b), weight=BIG - dist[(a, b)])
+                G.add_edge(("v", a), ("v", b), weight=BIG)  # spare boundaries pair for free
+        flip = set()
+        for u, v in nx.max_weight_matching(G, maxcardinality=True):
+            if u[0] == "d" and v[0] == "d": flip ^= pathq[(u[1], v[1])]
+            elif u[1] == v[1] and {u[0], v[0]} == {"d", "v"}: flip ^= pathq[(u[1], "B")]
+        return flip
+
+    def __call__(self, syndrome):
+        s = int(syndrome); n = self.n; tag = 0
+        for j in self._match(s, self._Xdec): tag ^= 1 << (2*(n-1-j))   # X on qubit j
+        for j in self._match(s, self._Zdec): tag ^= 2 << (2*(n-1-j))   # Z on qubit j (both -> Y)
+        return tag
 
 
 
@@ -521,9 +605,6 @@ def random_tag(size, p_unit):
         else:                      e = 2
         err = (err << 2) + e
     return err
-
-
-
 
 
 
