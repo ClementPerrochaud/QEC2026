@@ -77,3 +77,4 @@ python run.py
 - Tags use `int64` for `n ≤ 31` qubits and fall back to Python big-ints (`object` arrays) beyond
   that — so `d ≥ 7` is memory-bound; keep `wmax` low.
 - `requires`: `numpy`, `scipy`, `matplotlib`, `networkx`.
+- My good friend Claude wrote this README.
