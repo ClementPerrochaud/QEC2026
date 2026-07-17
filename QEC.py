@@ -16,9 +16,6 @@ import time
 
 
 def _tag_dtype(max_value):
-    ''' np.int64 while tags fit in it (fast), else python-int object arrays (unbounded size,
-        so codes with more than 31 qubits can be studied)
-    '''
     return np.int64 if max_value <= (1 << 62) else object
 
 
@@ -36,7 +33,7 @@ def get_tags(base, size, wmax=-1, wmin=0):
 def _get_tags(base, size, wmax, wmin, dt):
     if wmin > wmax: return np.array([], dtype=dt)
     if wmax == 0:  return np.array([0], dtype=dt)
-    if size == 1: return np.array(range(wmin, base), dtype=dt)
+    if size == 1: return np.array(range(max(wmin, 0), base), dtype=dt)
     tags_0 = _get_tags(base, size-1, min(size-1,wmax), wmin, dt)
     tags_1 = _get_tags(base, size-1, wmax-1, wmin-1, dt)
     parts = [tags_0*base] + [tags_1*base + b for b in range(1, base)]
@@ -95,7 +92,7 @@ def entropy_form(p):
     '''
     p = np.asarray(p, dtype=float)
     out = np.zeros_like(p)
-    mask = (p > 0) & (p < 1)          # only these contribute; avoids log(0) warnings
+    mask = (p > 0) & (p < 1)
     out[mask] = -p[mask] * np.log(p[mask])
     return out
 
@@ -207,7 +204,7 @@ def logical(E, code):
 def is_stabilizer(E, code):
     ''' True iff E is in the stabilizer group (0-syndrome AND trivial logical action)
     '''
-    return code.logical(E) == 0 and all(symp(E, s, code.n) == 0 for s in code.generators)
+    return logical(E, code) == 0 and all(symp(E, s, code.n) == 0 for s in code.generators)
 
 
 
@@ -215,7 +212,7 @@ def is_stabilizer(E, code):
 
 
 
-NQSC_code = QEC_code("NQSC", [
+code_NQSC = QEC_code("NQSC", [
     "ZZIIIIIII",    
     "IZZIIIIII",
     "IIIZZIIII",
@@ -226,7 +223,7 @@ NQSC_code = QEC_code("NQSC", [
     "IIIXXXXXX"
 ])
 
-SQSC_code = QEC_code("SQSC", [
+code_SQSC = QEC_code("SQSC", [
     "IIIXXXX",
     "IXXIIXX",
     "XIXIXIX",
@@ -235,21 +232,66 @@ SQSC_code = QEC_code("SQSC", [
     "ZIZIZIZ"
 ])
 
-LMPZ_code = QEC_code("LMPZ", [
+code_LMPZ = QEC_code("LMPZ", [
     "XZZXI",
     "IXZZX",
     "XIXZZ",
     "ZXIXZ"
 ])
 
-X_code = QEC_code("X", [
+code_X = QEC_code("X", [
     "IZZ",
     "ZZI"
 ])
 
-Z_code = QEC_code("Z", [
+code_Z = QEC_code("Z", [
     "IXX",
     "XXI"
+])
+
+code_RM15 = QEC_code("RM15", [
+    "XIXIXIXIXIXIXIX",
+    "IXXIIXXIIXXIIXX",
+    "IIIXXXXIIIIXXXX",
+    "IIIIIIIXXXXXXXX",
+    "ZIZIZIZIZIZIZIZ",
+    "IZZIIZZIIZZIIZZ",
+    "IIIZZZZIIIIZZZZ",
+    "IIIIIIIZZZZZZZZ",
+    "IIZIIIZIIIZIIIZ",
+    "IIIIZIZIIIIIZIZ",
+    "IIIIIIIIZIZIZIZ",
+    "IIIIIZZIIIIIIZZ",
+    "IIIIIIIIIZZIIZZ",
+    "IIIIIIIIIIIZZZZ"
+])
+
+code_SC13 = QEC_code("SC13", [
+    "XXIXIIIIIIIII",
+    "IXXIXIIIIIIII",
+    "ZIIZIZIIIIIII",
+    "IZIZZIZIIIIII",
+    "IIZIZIIZIIIII",
+    "IIIXIXXIXIIII",
+    "IIIIXIXXIXIII",
+    "IIIIIZIIZIZII",
+    "IIIIIIZIZZIZI",
+    "IIIIIIIZIZIIZ",
+    "IIIIIIIIXIXXI",
+    "IIIIIIIIIXIXX"
+])
+
+code_C11 = QEC_code("C11", [
+    "XIIIIXZZIXX",
+    "ZIIIIZXYYIX",
+    "IXIIIXZYZIY",
+    "IZIIIZZZYYI",
+    "IIXIIXZXXZI",
+    "IIZIIZYIYZZ",
+    "IIIXIXYIXXY",
+    "IIIZIZIZXZX",
+    "IIIIXXXIZZX",
+    "IIIIZZIYZYZ"
 ])
 
 
@@ -303,7 +345,7 @@ def get_proba(err, p_unit, coden):
     p_unit = np.asarray(p_unit, dtype=float)[[0, 1, 3, 2]]  # (I,X,Y,Z) -> digit order (I,X,Z,Y)
     proba = np.ones(err.shape, dtype=float)
     for k in range(coden):
-        proba *= p_unit[((err >> (2*k)) & 3).astype(np.int64)]  # digit is 0..3, safe even for big-int tags
+        proba *= p_unit[((err >> (2*k)) & 3).astype(np.int64)]
     return proba
 
 
@@ -324,9 +366,9 @@ def get_syndrome(error_tags, code):
     compute the syndroms of each errors     \n
     err = error tags or array of error tags
     '''
-    big = code.n > 31                                      # tags need more than 62 bits -> python big ints
+    big = code.n > 31
     error_tags = np.asarray(error_tags, dtype=object) if big else np.asarray(error_tags)
-    scalar = error_tags.ndim == 0                          # 0-d object arrays misbehave -> work in 1-d
+    scalar = error_tags.ndim == 0
     error_tags = np.atleast_1d(error_tags)
     maskx = np.array(int("01"*code.n, 2), dtype=object) if big else int("01"*code.n, 2)
     ex = error_tags & maskx
@@ -366,6 +408,19 @@ def get_syndrome_proba(syndrome_errors, error_proba):
     return syndrome_proba
 
 
+def get_equivalence_proba(syndrome_errors, error_proba, error_tags, code):
+    ''' 
+    '''
+    equivalence_proba = []
+    for L in syndrome_errors:
+        cosets = {}
+        for j in L:
+            l = logical(error_tags[j], code)
+            cosets[l] = cosets.get(l, 0) + error_proba[j]
+        equivalence_proba.extend(cosets.values())
+    return equivalence_proba
+
+
 def sorted_syndrome_error_indices(syndrome_errors, error_proba, syndrome_proba=None):
     ''' sort syndromes by their probabilities
     '''
@@ -403,15 +458,143 @@ def get_new_proba(error_proba, corrected_errors, corrected_error_tags):
 def get_fidelity(error_proba, error_tags, code):
     ''' compute the corrected state fidelity (the success probability)
     '''
-    return np.sum([p for p, t in zip(error_proba, error_tags) if code.logical(t) == 0])
+    return np.sum([p for p, t in zip(error_proba, error_tags) if logical(t, code) == 0])
 
 
-def compute_threashold(p,p_prime):
+def get_logical_proba(error_proba, error_tags, code):
+    ''' logical error distribution left after correction: total probability of each
+        logical class (I,X,Y,Z) of the residual error. \n
+        pI' is the fidelity / success probability. \n
+        -> (pI', pX', pY', pZ')
+    '''
+    cls = [0., 0., 0., 0.]
+    for p, t in zip(error_proba, error_tags):
+        cls[logical(t, code)] += p
+    return cls[0], cls[1], cls[3], cls[2]
+
+
+def compute_breakeven(p,p_prime):
     y = np.array(p_prime) - np.array(p)
     if y[0] > 0: return 0
     for i in range(1, len(y)):
         if y[i] > 0:
             return p[i-1] - y[i-1] * (p[i]-p[i-1]) / (y[i]-y[i-1])
+        
+def compute_threshold(x1, p1, x2, p2, floor=0.01, n=512):
+    '''
+    crossing point of two logical-error curves p1(x1) and p2(x2): the x where p1-p2      \n
+    changes sign.  the two curves need NOT share the same x-axis -- each is resampled by   \n
+    log-log interpolation onto a common log-spaced grid (n points) over their overlapping  \n
+    x-range.  only grid points where BOTH curves are above `floor` are considered, so the   \n
+    sub-resolution low-p region (MC shot noise, exact 0s) cannot trigger a spurious         \n
+    crossing.  returns None if the curves don't cross in the resolved range.
+    '''
+    x1, p1 = np.asarray(x1, float), np.asarray(p1, float)
+    x2, p2 = np.asarray(x2, float), np.asarray(p2, float)
+
+    lo = max(x1.min(), x2.min())        # overlapping x-range of the two curves
+    hi = min(x1.max(), x2.max())
+    if not lo < hi: return None
+    xg = np.logspace(np.log10(lo), np.log10(hi), n)
+
+    def loginterp(x, p):                # sample p(x) on xg, interpolating in log-log space
+        return np.exp(np.interp(np.log(xg), np.log(x), np.log(np.clip(p, 1e-300, None))))
+    g1, g2 = loginterp(x1, p1), loginterp(x2, p2)
+
+    y = g1 - g2
+    idx = np.flatnonzero((g1 > floor) & (g2 > floor))
+    for k in range(1, len(idx)):
+        i, j = idx[k-1], idx[k]
+        if (y[j] > 0) != (y[i] > 0):
+            return xg[i] - y[i] * (xg[j]-xg[i]) / (y[j]-y[i])
+    return None
+
+
+
+### - - - - - - - - - - - - - - - - - - - - - - -
+
+
+
+def load_mc_curve(distance):
+    '''
+    load a saves_mc/data_{d}.npy monte-carlo run and return                              \n
+    (p, pL, N):  physical error rate p, logical error rate pL = 1 - final[:,0]/N,        \n
+    and the shot count N per point.
+    '''
+    er, fin = np.load(f"saves_mc/data_{distance}.npy", allow_pickle=True)
+    er  = np.asarray(er, dtype=np.float64)
+    fin = np.array([f for f in fin], dtype=np.float64)
+    N   = fin.sum(axis=1)
+    pL  = 1 - fin[:, 0] / N
+    return er, pL, N
+
+
+
+def load_bf_curve(folder, suffix=""):
+    '''
+    load a saves_bf/{folder}/data{suffix}.npy brute-force run and return                 \n
+    (p, pL, eff):  physical error rate p, logical error rate pL = 1 - fidelity, and the  \n
+    correction efficiency eff = (S_equivalence - S_logical) / S_measure.
+    '''
+    _, measure_S, _, equiv_S, p, logical_probas = \
+        [np.asarray(L) for L in np.load(f"saves_bf/{folder}/data{suffix}.npy", allow_pickle=True)]
+    pL  = 1 - logical_probas[:, 0]
+    eff = (equiv_S - np.sum(entropy_form(logical_probas), axis=1)) / measure_S
+    return p, pL, eff
+
+
+
+def fit_threshold_mc(distances=(3, 5, 7, 9), pmax=0.12, min_events=10, verbose=True):
+    '''
+    joint regression of the monte-carlo curves to the QEC threshold-theorem model        \n
+                                                                                         \n
+        pL(p, d) = A * (p / p_th) ** (B * (d + 1) / 2)                                   \n
+                                                                                         \n
+    shared parameters A, B, p_th across all distances.  the fit is done in log space     \n
+        log pL = log A + B*(d+1)/2 * (log p - log p_th)                                  \n
+    with binomial weights sigma(log pL) = sqrt((1-pL)/(N*pL)).  only the sub-threshold   \n
+    window p < pmax (where higher d suppresses pL) with at least `min_events` logical    \n
+    failures is used -- above threshold the power law does not hold and pL saturates at  \n
+    3/4.  returns (A, B, p_th, perr) with perr the 1-sigma errors on (logA, B, p_th).
+    '''
+    from scipy.optimize import curve_fit
+
+    P, D, PL, SIG = [], [], [], []
+    for d in distances:
+        p, pL, N = load_mc_curve(d)
+        nfail = N * pL
+        m = (p < pmax) & (nfail >= min_events) & (pL < 1)
+        P.append(p[m]); D.append(np.full(m.sum(), d)); PL.append(pL[m])
+        SIG.append(np.sqrt((1 - pL[m]) / (N[m] * pL[m])))          # sigma of log pL
+        if verbose:
+            print(f"d={d}: using {m.sum()}/{len(p)} points  (p < {pmax})")
+    P   = np.concatenate(P);  D  = np.concatenate(D)
+    PL  = np.concatenate(PL); SIG = np.concatenate(SIG)
+
+    def logmodel(X, logA, B, p_th):
+        p, d = X
+        return logA + B * (d + 1) / 2 * (np.log(p) - np.log(p_th))
+
+    p0 = [np.log(0.5), 1.0, 0.15]
+    popt, pcov = curve_fit(
+        logmodel, (P, D), np.log(PL),
+        p0=p0, sigma=SIG, absolute_sigma=True,
+        bounds=([-15.0, 0.05, 0.01], [5.0, 6.0, 0.5]),
+        maxfev=20000,
+    )
+    logA, B, p_th = popt
+    perr = np.sqrt(np.diag(pcov))
+    A = np.exp(logA)
+
+    resid = (logmodel((P, D), *popt) - np.log(PL)) / SIG
+    chi2_red = np.sum(resid ** 2) / (len(PL) - 3)
+
+    if verbose:
+        print(f"\nA     = {A:.4g}")
+        print(f"B     = {B:.4g}  +/- {perr[1]:.2g}")
+        print(f"p_th  = {p_th:.4g}  +/- {perr[2]:.2g}")
+        print(f"chi2_red = {chi2_red:.3g}")
+    return A, B, p_th, perr
 
 
 
