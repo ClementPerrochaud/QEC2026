@@ -46,7 +46,7 @@ def plot_errors_to_syndromes(syndrome_errors, error_proba, syndrome_proba, error
             if show_error_tags and tags[i] != -1 and h/syndrome_proba[syndrome_ind[0]] > error_tag_lim:
                 if highlight_stabilizers and tags[i] in code.generators:
                     ax.text(s_pos, heights[i]+h/2, letterify(tags[i],code.n), ha="center", va="center", color="black", fontfamily="monospace", fontsize=6, fontweight="bold")
-                elif highlight_stabilizers and code.is_stabilizer(tags[i]):
+                elif highlight_stabilizers and is_stabilizer(tags[i], code):
                     ax.text(s_pos, heights[i]+h/2, letterify(tags[i],code.n), ha="center", va="center", color="black", fontfamily="monospace", fontsize=6)
                 else :
                     ax.text(s_pos, heights[i]+h/2, letterify(tags[i],code.n), ha="center", va="center", color="white", fontfamily="monospace", fontsize=6)
@@ -65,13 +65,13 @@ def plot_errors_to_syndromes(syndrome_errors, error_proba, syndrome_proba, error
 
 
 def single_brute_force():
-    code = rotated_surface_code(3)
+    code = code_LMPZ
     file = f"saves_bf/{code.name}"
-    wmax = 6
+    wmax = code.n
     g, gc = 1, 1
-    t = 1
+    t = 0.5
 
-    do_plot = False
+    do_plot = True
 
     T0 = time.time()
 
@@ -88,7 +88,7 @@ def single_brute_force():
     t1 = time.time(); print(f"\rerror_proba                  - {(t1-t0):.3g} s")
 
     print("\rerror_syndrome...", end=""); t0 = time.time()
-    error_syndromes = get_syndrome(error_tags, code.code, code.n)
+    error_syndromes = get_syndrome(error_tags, code)
     t1 = time.time(); print(f"\rerror_syndrome               - {(t1-t0):.3g} s")
 
     print("\rsyndrome_errors...", end=""); t0 = time.time()
@@ -130,7 +130,7 @@ def single_brute_force():
     if do_plot:
         print("\rplotting...", end=""); t0 = time.time()
         plot_errors_to_syndromes(syndrome_errors, error_proba, syndrome_proba, error_tags, syndrome_tags, code, 
-                                 sorted_syndrome_ind, sorted_syndrome_errors_ind, fuse_errors=True, show_error_tags=False, highlight_stabilizers=False, error_tag_lim=0, #figsize=(500,200),
+                                 sorted_syndrome_ind, sorted_syndrome_errors_ind, fuse_errors=False, show_error_tags=True, highlight_stabilizers=True, error_tag_lim=0, #figsize=(500,200),
                                  title=f"{code.name} (approx {code.n-wmax})  -  g = {g}  -  gc = {gc}  -  t = {t:.3e}  -  p = {round(( 1-IXYZ_proba[0] )*100,2)}%  -  p' = {round(( 1-fidelity )*100,2)}%")
         t1 = time.time(); print(f"\rplotting                     - {(t1-t0):.3g} s")
 
@@ -143,8 +143,9 @@ def single_brute_force():
     T1 = time.time()
     print(f"\nTOTAL - {(T1-T0):.3g} s\n")
 
-    plt.savefig("bigassplot.png")
-    #plt.show()
+    if do_plot:
+        plt.savefig("bigassplot.png")
+        #plt.show()
 
 
 
@@ -155,9 +156,9 @@ def single_brute_force():
 def multiple_brute_force():
     code = rotated_surface_code(5)
     file = f"saves_bf/{code.name}"
-    wmax = 6
+    wmax = 3
     g, gc = 1, 1
-    times = np.logspace(-2,0.3,15) # 8 15 22 29 36 43 50
+    times = np.logspace(-2.5,0,43) # 8 15 22 29 36 43 50 # -2,0.3 # -2.5,0
 
     do_plot = False
     save_name = f"_{wmax}"
@@ -167,21 +168,25 @@ def multiple_brute_force():
     data_entropies           = np.array([])
     measure_entropies        = np.array([])
     corrected_data_entropies = np.array([])
+    equivalence_entropies    = np.array([])
     error_probas             = np.array([])
-    fidelities               = np.array([])
+    logical_probas           = np.empty((0,4))
 
     for i,t in enumerate(times):
+
+        print(f"{i+1}/{len(times)}")
 
         IXYZ_proba = get_IXYZ_error_proba(t,g,gc)
         error_tags = get_tags(4, code.n, wmax)
 
         error_proba = get_proba(error_tags, IXYZ_proba, code.n)
-        error_syndromes = get_syndrome(error_tags, code.code, code.n)
+        error_syndromes = get_syndrome(error_tags, code)
         syndrome_errors = find_syndrome_errors(error_syndromes)
         syndrome_tags = list(syndrome_errors.keys())
         syndrome_errors = list(syndrome_errors.values())
 
-        syndrome_proba = get_syndrome_proba(syndrome_errors, error_proba) 
+        syndrome_proba = get_syndrome_proba(syndrome_errors, error_proba)
+        equivalence_proba = get_equivalence_proba(syndrome_errors, error_proba, error_tags, code)
 
         if do_plot:
             sorted_syndrome_ind, sorted_syndrome_errors_ind = sorted_syndrome_error_indices(syndrome_errors, error_proba, syndrome_proba)
@@ -192,25 +197,30 @@ def multiple_brute_force():
         corrected_errors = [corrected_error_ind[corrected_errors[ei]] for ei in range(len(error_tags))]
 
         corrected_error_proba = get_new_proba(error_proba, corrected_errors, corrected_error_tags)
-        fidelity = get_fidelity(corrected_error_proba, corrected_error_tags, code)
+        logical_proba = get_logical_proba(corrected_error_proba, corrected_error_tags, code)
 
         if do_plot:
             plot_errors_to_syndromes(syndrome_errors, error_proba, syndrome_proba, error_tags, syndrome_tags, code, 
                                      sorted_syndrome_ind, sorted_syndrome_errors_ind, fuse_errors=True, show_error_tags=False, highlight_stabilizers=False,
-                                     title=f"{code.name} (approx {code.n-wmax})  -  g = {g}  -  gc = {gc}  -  t = {t:.3e}  -  p = {round(( 1-IXYZ_proba[0] )*100,2)}%  -  p' = {round(( 1-fidelity )*100,2)}%")
+                                     title=f"{code.name} (approx {code.n-wmax})  -  g = {g}  -  gc = {gc}  -  t = {t:.3e}  -  p = {round(( 1-IXYZ_proba[0] )*100,2)}%  -  p' = {round(( 1-logical_proba[0] )*100,2)}%")
             plt.savefig(f"{file}/{str(i).zfill(3)}.png")
             plt.close()
         
-        data_entropy = np.sum(entropy_form(error_proba))
-        measure_entropy = np.sum(entropy_form(syndrome_proba))
+        data_entropy           = np.sum(entropy_form(error_proba))
+        measure_entropy        = np.sum(entropy_form(syndrome_proba))
         corrected_data_entropy = np.sum(entropy_form(corrected_error_proba))
+        equivalence_entropy    = np.sum(entropy_form(equivalence_proba))
 
         data_entropies           = np.append(data_entropies,           [data_entropy])
         measure_entropies        = np.append(measure_entropies,        [measure_entropy])
         corrected_data_entropies = np.append(corrected_data_entropies, [corrected_data_entropy])
+        equivalence_entropies    = np.append(equivalence_entropies,    [equivalence_entropy])
         error_probas             = np.append(error_probas,             [1-IXYZ_proba[0]])
-        fidelities               = np.append(fidelities,               [fidelity])
-        np.save(f"{file}/data{save_name}", (data_entropies, measure_entropies, corrected_data_entropies, error_probas, fidelities))
+        logical_probas           = np.append(logical_probas,           [logical_proba], axis=0)
+
+        data = np.empty(6, dtype=object)
+        data[:] = (data_entropies, measure_entropies, corrected_data_entropies, equivalence_entropies, error_probas, logical_probas)
+        np.save(f"{file}/data{save_name}", data)
 
 
 
@@ -219,54 +229,55 @@ def multiple_brute_force():
 
 
 def bf_plotplot():
-    file = "saves_bf/LMPZ"
+    code_name = "3RSC"
+    file = f"saves_bf/{code_name}"
     extension = ""
 
     code, wmax, g, gc, times = np.load(f"{file}/param{extension}.npy", allow_pickle=True)
-    data_entropies, measure_entropies, corrected_data_entropies, error_probas, fidelities = [np.array(L) for L in np.load(f"{file}/data{extension}.npy")]
-    #IXYZ_probas = np.array([get_IXYZ_error_proba(t,g,gc) for t in times])
-    #single_entropies = np.sum(entropy_form(IXYZ_probas), axis=1)
-    #logipX, logipY, logipZ = [ (1-fidelities)/3 ]*3
-    #corrected_single_entropies = - fidelities*np.log(fidelities) - logipX*np.log(logipX) - logipY*np.log(logipY) - logipZ*np.log(logipZ)
-    efficiencies = (data_entropies - corrected_data_entropies)/measure_entropies
-    #efficiencies2 = (single_entropies - corrected_single_entropies)/measure_entropies
-    threashold = compute_threashold(error_probas, 1-fidelities)
+    data_entropies, measure_entropies, corrected_data_entropies, equivalence_entropies, error_probas, logical_probas = [np.array(L) for L in np.load(f"{file}/data{extension}.npy", allow_pickle=True)]
+    fidelities = logical_probas[:,0]
+    logical_corrected_entropies = np.sum(entropy_form(logical_probas), axis=1)
+    efficiencies1 = (data_entropies - corrected_data_entropies)/measure_entropies
+    efficiencies2 = (equivalence_entropies - logical_corrected_entropies)/measure_entropies
+    breakeven = compute_breakeven(error_probas, 1-fidelities)
 
     #plt.rcParams["font.family"] = "Times New Roman"
     #plt.rcParams["font.size"] = 11
     fig, ax = plt.subplots(1,3,figsize=(12,4),dpi=300)
 
-    #ax[0].loglog(error_probas, single_entropies,           lw=2, c="royalblue",      zorder=7,  label="logical")
-    #ax[0].loglog(error_probas, corrected_single_entropies, lw=2, c="darkturquoise",  zorder=8,  label="corrected logical")
-    ax[0].loglog(error_probas, data_entropies,             lw=2, c="crimson",        zorder=9,  label="data")
-    ax[0].loglog(error_probas, corrected_data_entropies,   lw=2, c="deeppink",       zorder=10, label="corrected data")
-    ax[0].loglog(error_probas, measure_entropies,          lw=2, c="mediumseagreen", zorder=11, label="measurement")
+    ax[0].loglog(error_probas, data_entropies,              lw=2, c="crimson",        zorder=9,  label="data",           ls="--")
+    ax[0].loglog(error_probas, corrected_data_entropies,    lw=2, c="deeppink",       zorder=10, label="corrected data", ls="--")
+    ax[0].loglog(error_probas, equivalence_entropies,       lw=2, c="darkviolet",     zorder=12, label="equivalence")
+    ax[0].loglog(error_probas, logical_corrected_entropies, lw=2, c="darkturquoise",  zorder=13, label="corrected logical")
+    ax[0].loglog(error_probas, measure_entropies,           lw=2, c="mediumseagreen", zorder=11, label="measurement")
     ax[0].legend()
-    ax[0].set_title("entropy")
+    ax[0].set_title("entropies")
     ax[0].grid(which='minor', linewidth=0.3, alpha=0.5)
 
     ax[1].loglog([0,error_probas[-1]**(1/code.n)], [0,error_probas[-1]**(1/code.n)], lw=1.5, ls="--", c="lightgrey", alpha=0.5)
-    ax[1].loglog(error_probas, 1-fidelities, lw=2, c="mediumseagreen")
+    ax[1].loglog(error_probas, 1-fidelities, lw=2, c="mediumseagreen", zorder=9)
     ax[1].grid(which='minor', linewidth=0.3, alpha=0.5)
-    ax[1].set_title("logical error probability" + ("" if threashold is None else f" (p_th = {round(threashold*100,2)}%)"))
+    ax[1].set_title(r"logical error probability $p'$" + ("" if breakeven is None else fr" ($p_\text{{BE}} = {round(breakeven*100,2)}\%$)"))
+    ax[1].set_xlabel(r"physical error rate $p$")
 
-    ax[2].loglog(error_probas, efficiencies, lw=2, c="mediumseagreen")
-    #ax[2].loglog(error_probas, efficiencies2, lw=2, c="royalblue")
-    ax[2].set_title("efficiency")
+    ax[2].loglog(error_probas, efficiencies1, lw=2, c="mediumseagreen", label="naive", ls="--")
+    ax[2].loglog(error_probas, efficiencies2, lw=2, c="darkturquoise",  label="physical")
+    ax[2].set_title("efficiency (-ies)")
     ax[2].grid(which='minor', linewidth=0.3, alpha=0.5)
+    ax[2].legend()
     
-    if not threashold in (None, 0): 
-        #ax[0].scatter([threashold], np.interp([threashold],error_probas,single_entropies),           s=40, c="royalblue",      zorder=15)
-        #ax[0].scatter([threashold], np.interp([threashold],error_probas,corrected_single_entropies), s=40, c="darkturquoise",  zorder=16)
-        ax[0].scatter([threashold], np.interp([threashold],error_probas,data_entropies),             s=40, c="crimson",        zorder=17)
-        ax[0].scatter([threashold], np.interp([threashold],error_probas,measure_entropies),          s=40, c="mediumseagreen", zorder=18)
-        ax[0].scatter([threashold], np.interp([threashold],error_probas,corrected_data_entropies),   s=40, c="deeppink",       zorder=19)
-        ax[1].scatter([threashold], np.interp([threashold],error_probas,1-fidelities),               s=40, c="mediumseagreen")
-        ax[2].scatter([threashold], np.interp([threashold],error_probas,efficiencies),               s=40, c="mediumseagreen")
-        #ax[2].scatter([threashold], np.interp([threashold],error_probas,efficiencies2),              s=40, c="royalblue")
+    if not breakeven in (None, 0): 
+        ax[0].scatter([breakeven], np.interp([breakeven],error_probas,data_entropies),              s=40, c="crimson",        zorder=17)
+        ax[0].scatter([breakeven], np.interp([breakeven],error_probas,measure_entropies),           s=40, c="mediumseagreen", zorder=18)
+        ax[0].scatter([breakeven], np.interp([breakeven],error_probas,corrected_data_entropies),    s=40, c="deeppink",       zorder=19)
+        ax[0].scatter([breakeven], np.interp([breakeven],error_probas,equivalence_entropies),       s=40, c="darkviolet",     zorder=20)
+        ax[0].scatter([breakeven], np.interp([breakeven],error_probas,logical_corrected_entropies), s=40, c="darkturquoise",  zorder=21)
+        ax[1].scatter([breakeven], np.interp([breakeven],error_probas,1-fidelities),                s=40, c="mediumseagreen")
+        ax[2].scatter([breakeven], np.interp([breakeven],error_probas,efficiencies1),               s=40, c="mediumseagreen")
+        ax[2].scatter([breakeven], np.interp([breakeven],error_probas,efficiencies2),               s=40, c="darkturquoise")
     
     plt.tight_layout()
-    plt.savefig("plotplot.png") #plt.savefig(f"{file}/{code.name}_plots{extension}.png")
+    plt.savefig(f"plotplot_{code_name}.png")
     #plt.show()
 
 
@@ -275,92 +286,68 @@ def bf_plotplot():
 
 
 
-def bf_plot_compare1():
-    #plt.rcParams["font.family"] = "Times New Roman"
-    #plt.rcParams["font.size"] = 11
-    fig, ax = plt.subplots(1,3,figsize=(12,4),dpi=300)
+def bf_compare_maxw():
+    file = f"saves_bf/3RSC"
+    extension = ""
 
-    for wmax in range(5,1,-1):
-        file = "saves_bf/LMPZ"
-        print(wmax)
+    figE, axE = plt.subplots(3, 3, figsize=(15, 13), dpi=300)   # one entropy panel per wmax (9 -> 1)
+    figL, axL = plt.subplots(1, 2, figsize=(11, 4.5), dpi=300)  # logical error proba + efficiency
 
-        code, wmax, g, gc, times = np.load(f"{file}/param_{wmax}.npy", allow_pickle=True)
-        data_entropies, measure_entropies, corrected_data_entropies, error_probas, fidelities = [np.array(L[10:]) for L in np.load(f"{file}/data_{wmax}.npy")]
-        efficiencies = (data_entropies - corrected_data_entropies)/measure_entropies
-        threashold = compute_threashold(error_probas, 1-fidelities)
+    speeds = np.load(f"{file}/speed.npy")
 
-        ax[0].loglog(error_probas, data_entropies, lw=.5+wmax/2, c="crimson", label="data", alpha=(wmax-1)/4)
-        ax[0].loglog(error_probas, corrected_data_entropies, lw=.5+wmax/2, c="deeppink", label="corrected data", alpha=(wmax-1)/4)
-        ax[0].loglog(error_probas, measure_entropies, lw=.5+wmax/2, c="mediumseagreen", label="measurement", alpha=(wmax-1)/4)
-        ax[0].set_title("entropy")
-        ax[0].grid(which='minor', linewidth=0.3, alpha=0.5)
-        ax[0].set_ylim(0.04,10)
+    for w in range(9, 0, -1):
+        code, wmax, g, gc, times = np.load(f"{file}/param_{w}.npy", allow_pickle=True)
+        data_entropies, measure_entropies, corrected_data_entropies, equivalence_entropies, error_probas, logical_probas = [np.array(L) for L in np.load(f"{file}/data_{w}.npy", allow_pickle=True)]
+        fidelities = logical_probas[:,0]
+        logical_corrected_entropies = np.sum(entropy_form(logical_probas), axis=1)
+        efficiencies1 = (data_entropies - corrected_data_entropies)/measure_entropies
+        efficiencies2 = (equivalence_entropies - logical_corrected_entropies)/measure_entropies
 
-        ax[1].loglog(error_probas, 1-fidelities, lw=.5+wmax/2, c="mediumseagreen", alpha=(wmax-1)/4)
-        ax[1].grid(which='minor', linewidth=0.3, alpha=0.5)
-        ax[1].set_title("logical error probability" + ("" if threashold is None else f" (p_th = {round(threashold*100,2)}%)"))
+        if wmax == 9:   # exact reference: draw the w=9 curves faintly on every other panel
+            breakeven = compute_breakeven(error_probas, 1-fidelities)
+            for i in range(1, 9):
+                a = axE[i//3, i%3]
+                a.loglog(error_probas, equivalence_entropies,       lw=3, c="black", alpha=0.2,  zorder=5)
+                a.loglog(error_probas, logical_corrected_entropies, lw=3, c="black", alpha=0.1,  zorder=5)
+                a.loglog(error_probas, measure_entropies,           lw=3, c="black", alpha=0.15, zorder=5)
+            axL[0].loglog([error_probas[0], error_probas[-1]**(1/code.n)], [error_probas[0], error_probas[-1]**(1/code.n)], lw=1.5, ls="--", c="lightgrey", zorder=4, alpha=0.5)
+            if breakeven not in (None, 0):
+                axL[0].scatter([breakeven], np.interp([breakeven],error_probas,1-fidelities),  s=40, color=cm.PuBuGn(1.0), zorder=5)
+                axL[1].scatter([breakeven], np.interp([breakeven],error_probas,efficiencies2), s=40, color=cm.PuBuGn(1.0), zorder=5)
 
-        ax[2].loglog(error_probas, efficiencies, lw=.5+wmax/2, c="mediumseagreen", alpha=(wmax-1)/4)
-        ax[2].set_title("efficiency")
-        ax[2].grid(which='minor', linewidth=0.3, alpha=0.5)
-        ax[2].set_ylim(0.5,1.04)
+        a = axE[(9-wmax)//3, (9-wmax)%3]
+        if breakeven not in (None, 0):
+            a.scatter([breakeven], np.interp([breakeven],error_probas,equivalence_entropies),       s=40, c="darkviolet",     zorder=5)
+            a.scatter([breakeven], np.interp([breakeven],error_probas,measure_entropies),           s=40, c="mediumseagreen", zorder=5)
+            a.scatter([breakeven], np.interp([breakeven],error_probas,logical_corrected_entropies), s=40, c="darkturquoise",  zorder=5)
+        a.loglog(error_probas, equivalence_entropies,       lw=3, c="darkviolet",     zorder=10, label="equivalence")
+        a.loglog(error_probas, logical_corrected_entropies, lw=3, c="darkturquoise",  zorder=10, label="corrected logical")
+        a.loglog(error_probas, measure_entropies,           lw=3, c="mediumseagreen", zorder=10, label="measurement")
+        a.set_title(fr"max weight $w_\text{{max}} = {wmax}$ - speed increase $\times {(speeds[0]/speeds[9-w]):.2g}$")
+        a.grid(which='minor', linewidth=0.3, alpha=0.5)
 
-        if not threashold in (None, 0) and wmax == 5: 
-            ax[1].loglog([0,error_probas[-1]**(1/code.n)], [0,error_probas[-1]**(1/code.n)], lw=1.5, ls="--", c="lightgrey", alpha=0.5)
-            ax[0].scatter([threashold], np.interp([threashold],error_probas,data_entropies),         alpha=wmax/5, s=40, c="crimson")
-            ax[0].scatter([threashold], np.interp([threashold],error_probas,measure_entropies),       alpha=wmax/5, s=40, c="mediumseagreen")
-            ax[0].scatter([threashold], np.interp([threashold],error_probas,corrected_data_entropies), alpha=wmax/5, s=40, c="deeppink")
-            ax[1].scatter([threashold], np.interp([threashold],error_probas,1-fidelities),              alpha=wmax/5, s=40, c="mediumseagreen")
-            ax[2].scatter([threashold], np.interp([threashold],error_probas,efficiencies),               alpha=wmax/5, s=40, c="mediumseagreen")
+        axL[0].loglog(error_probas, 1-fidelities, lw=1+wmax/3, zorder=20-wmax, c=cm.GnBu((wmax+1)/10), label=fr"$w_\text{{max}} = {wmax}$")
+        axL[0].grid(which='minor', linewidth=0.3, alpha=0.5)
 
-    plt.tight_layout()
-    plt.savefig(f"{file}/{code.name}_plots_approx.png")
+        axL[1].loglog(error_probas, efficiencies2, lw=1+wmax/3, zorder=20-wmax, c=cm.GnBu((wmax-1)/8))
 
+    axL[0].grid(which='minor', linewidth=0.3, alpha=0.5)
+    
+    axL[1].set_title("efficiency")
+    axL[1].grid(which='minor', linewidth=0.3, alpha=0.5)
+    axL[1].set_ylim(0.6, 1.04)
 
+    axL[0].set_title(r"logical error probability $p'$" + ("" if breakeven is None else fr" ($p_\text{{BE}} = {round(breakeven*100,2)}\%$)"))
+    axE[0,0].legend()
+    axE[2,1].set_xlabel(r"physical error rate $p$")
+    axL[0].legend(title=r"$w_\text{max}$", fontsize=8, ncol=2, loc="lower right")
 
-def bf_plot_compare2():
-    fig, ax = plt.subplots(2,4,figsize=(18,8),dpi=300)
-    file = "saves_bf/3RSC"
-
-    for wmax in range(9,3,-1):
-        print(wmax)
-        code, wmax, g, gc, times = np.load(f"{file}/param_{wmax}.npy", allow_pickle=True)
-        data_entropies, measure_entropies, corrected_data_entropies, error_probas, fidelities = [np.array(L) for L in np.load(f"{file}/data_{wmax}.npy")]
-        efficiencies = (data_entropies - corrected_data_entropies)/measure_entropies
-        threashold = compute_threashold(error_probas, 1-fidelities)
-
-        if wmax == 9:
-            for i in range(1,6):
-                ax[i//3,i%3].loglog(error_probas, data_entropies, lw=3, c="black", alpha=0.35, zorder=5)
-                ax[i//3,i%3].loglog(error_probas, corrected_data_entropies, lw=3, c="black", alpha=0.3, zorder=5)
-                ax[i//3,i%3].loglog(error_probas, measure_entropies, lw=3, c="black", alpha=0.2, zorder=5)
-                if not threashold in (None, 0): 
-                    ax[i//3,i%3].scatter([threashold], np.interp([threashold],error_probas,data_entropies),         s=40, c="crimson", zorder=5)
-                    ax[i//3,i%3].scatter([threashold], np.interp([threashold],error_probas,measure_entropies),       s=40, c="mediumseagreen", zorder=5)
-                    ax[i//3,i%3].scatter([threashold], np.interp([threashold],error_probas,corrected_data_entropies), s=40, c="deeppink", zorder=5)
-            ax[0,3].loglog([0,error_probas[-1]**(1/code.n)], [0,error_probas[-1]**(1/code.n)], lw=1.5, ls="--", c="lightgrey", zorder=4, alpha=0.5)
-            ax[0,3].scatter([threashold], np.interp([threashold],error_probas,1-fidelities), s=40, c=cm.PuBuGn(1.0), zorder=5)
-            ax[1,3].scatter([threashold], np.interp([threashold],error_probas,efficiencies), s=40, c=cm.PuBuGn(1.0), zorder=5)
-
-        ax[(9-wmax)//3,(9-wmax)%3].loglog(error_probas, data_entropies, lw=3, c="crimson", zorder=10, label="data")
-        ax[(9-wmax)//3,(9-wmax)%3].loglog(error_probas, corrected_data_entropies, lw=3, c="deeppink", zorder=10, label="corrected data")
-        ax[(9-wmax)//3,(9-wmax)%3].loglog(error_probas, measure_entropies, lw=3, c="mediumseagreen", zorder=10, label="measurement")
-        ax[(9-wmax)//3,(9-wmax)%3].set_title(f"entropy (w_max = {wmax})")
-        ax[(9-wmax)//3,(9-wmax)%3].grid(which='minor', linewidth=0.3, alpha=0.5)
-        #ax[0].set_ylim(0.04,10)
-
-        ax[0,3].loglog(error_probas, 1-fidelities, lw=wmax/3, zorder=20-wmax, c=cm.PuBuGn((wmax-1)/8))
-        ax[0,3].grid(which='minor', linewidth=0.3, alpha=0.5)
-        ax[0,3].set_title("logical error probability" + ("" if threashold is None else f" (p_th = {round(threashold*100,2)}%)"))
-
-        ax[1,3].loglog(error_probas, efficiencies, lw=wmax/3, zorder=20-wmax, c=cm.PuBuGn((wmax-1)/8))
-        ax[1,3].set_title("efficiency")
-        ax[1,3].grid(which='minor', linewidth=0.3, alpha=0.5)
-        ax[1,3].set_ylim(0.6,1.04)
-
-    plt.tight_layout()
-    plt.savefig(f"{file}/{code.name}_plots_approx.png")
+    figE.tight_layout()
+    figL.tight_layout()
+    figE.savefig("plot_approx_entropies.png")
+    figL.savefig("plot_approx_logical_efficiency.png")
     #plt.show()
+
 
 
 
@@ -406,12 +393,12 @@ def monte_carlo():
 
 
 
-def monte_carlo_rsc():
-    distance = 9
+def monte_carlo_rsc(distance):
     code = rotated_surface_code(distance)
     g, gc = 1, 1
-    times = np.logspace(-2, 0.3, 50) # 8 15 22 29 36 43 50
-    shot = 10000
+    times = np.logspace(-2, 0.3, 43) # 8 15 22 29 36 43 50
+    shot0 = 100000
+    shot = shot0
 
     error_rates = []
     finals = []
@@ -437,13 +424,13 @@ def monte_carlo_rsc():
             log = logical(res, code)
             final[log] += 1
         
+        shot = int(shot0*(1-(1-final[0]/shot)*1.3))
         finals.append(final)
-        print(f"p = {(1-IXYZ_proba[0]):.3g} \t p' = {(1-final[0]/sum(final)):.3g} \t {final}")
-    np.save(f"saves_mc/RSC/data_{distance}", np.array([error_rates, finals], dtype=object))     
+        print(f"p = {(1-IXYZ_proba[0]):.3g} \t p' = {(1-final[0]/sum(final)):.3g} \t {final} \t shot = {shot}")
+    np.save(f"saves_mc/data_{distance}", np.array([error_rates, finals], dtype=object))     
 
 
 ### - - - - - - - - - - - - - - - - - - - - - - -
-
 
 
 def plot_ml():
@@ -481,11 +468,107 @@ def plot_ml():
     plt.show()
 
 
+### - - - - - - - - - - - - - - - - - - - - - - -
+### - - - - - - - - - - - - - - - - - - - - - - -
+
+
+def plot_threshold_fit(distances=(3, 5, 7, 9), pmax=0.12, min_events=10):
+    '''
+    fit the threshold-theorem model with fit_threshold_mc() and overlay the fitted        \n
+    curves on the monte-carlo data (log-log).
+    '''
+    A, B, p_th, perr = fit_threshold_mc(distances, pmax, min_events)
+    colors = dict(zip((3, 5, 7, 9),
+                      ["purple", "mediumslateblue", "cornflowerblue", "lightskyblue"]))
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    for d in distances:
+        p, pL, N = load_mc_curve(d)
+        c = colors.get(d, None)
+        ax.loglog(p, pL, "o", ms=4, alpha=0.5, color=c, label=f"MC $d={d}$")
+        pp = np.logspace(np.log10(p.min()), np.log10(min(pmax, p.max())), 200)
+        ax.loglog(pp, A * (pp / p_th) ** (B * (d + 1) / 2), lw=2, color=c)
+
+    ax.axvline(p_th, ls="--", c="grey", alpha=0.6)
+    ax.set_xlabel("physical error rate $p$")
+    ax.set_ylabel("logical error rate $p_L$")
+    ax.set_title(rf"$p_L = A\,(p/p_{{th}})^{{B(d+1)/2}}$   "
+                 rf"($A={A:.2g}$, $B={B:.2g}$, $p_{{th}}={p_th:.3g}$)")
+    ax.grid(which="minor", linewidth=0.3, alpha=0.5)
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+    return A, B, p_th, perr
+
+
+### - - - - - - - - - - - - - - - - - - - - - - -
+### - - - - - - - - - - - - - - - - - - - - - - -
+
+
+def plot_rsc_compare():
+    fig, (axL, axE) = plt.subplots(1, 2, figsize=(11, 6))#, dpi=300)
+    
+    rsc3_9_p, rsc3_9_pL, rsc3_9_eff = load_bf_curve("3RSC")      
+    rsc3_3_p, rsc3_3_pL, rsc3_3_eff = load_bf_curve("3RSC", "_3")
+    rsc5_5_p, rsc5_5_pL, rsc5_5_eff = load_bf_curve("5RSC", "_5")
+    rsc5_4_p, rsc5_4_pL, rsc5_4_eff = load_bf_curve("5RSC", "_4")
+    rsc5_3_p, rsc5_3_pL, rsc5_3_eff = load_bf_curve("5RSC", "_3")
+
+    threshold_bf = compute_threshold(rsc3_9_p, rsc3_9_pL, rsc5_5_p, rsc5_5_pL)
+
+    mc_dists  = (3, 5, 7, 9)
+    mc_colors = ("purple", "mediumslateblue", "cornflowerblue", "lightskyblue")
+    mc = {d: load_mc_curve(d) for d in mc_dists}
+
+    threshold_mc = np.mean([
+        compute_threshold(mc[da][0], mc[da][1], mc[db][0], mc[db][1])
+        for da, db in zip(mc_dists[:-1], mc_dists[1:])
+    ])
+    threshold_mc_y = np.mean([
+        np.interp(threshold_mc, p, pL) for p, pL, _ in mc.values()
+    ])
+
+    for zorder, (d, color) in zip(range(16, 12, -1), zip(mc_dists, mc_colors)):
+        p, pL, _ = mc[d]
+        axL.loglog(p, pL, c=color, lw=7, zorder=zorder, label=f"MC $d={d}$", alpha=0.5)
+        if d == mc_dists[0]:
+            xlim, ylim = axL.get_xlim(), axL.get_ylim()
+            lo, hi = min(xlim[0], ylim[0]), max(xlim[1], ylim[1])
+    axL.scatter([threshold_mc], [threshold_mc_y], s=500, color="violet", alpha=0.7, zorder=12)
+
+    axL.loglog(rsc3_9_p, rsc3_9_pL, lw=2, c="purple",          zorder=20, label=r"exact $d=3$", ls="--")
+    axL.loglog(rsc3_3_p, rsc3_3_pL, lw=2, c="purple",          zorder=21, label=r"$3$-approx $d=3$")
+    axL.loglog(rsc5_5_p, rsc5_5_pL, lw=2, c="mediumslateblue", zorder=22, label=r"$5$-approx $d=5$")
+    axL.loglog(rsc5_4_p, rsc5_4_pL, lw=2, c="mediumslateblue", zorder=22, label=r"$4$-approx $d=5$", alpha=0.7, ls="-.")
+    axL.loglog(rsc5_3_p, rsc5_3_pL, lw=2, c="mediumslateblue", zorder=22, label=r"$4$-approx $d=5$", alpha=0.5, ls=":") 
+    axL.scatter([threshold_bf], np.interp([threshold_bf], rsc3_3_p, rsc3_3_pL), s=50, color="purple", zorder=21)
+
+    axL.plot([lo, hi], [lo, hi], lw=1.5, ls="--", c="lightgrey", zorder=5, alpha=0.5)
+    axL.set_xlim(0.05,0.3); axL.set_ylim(0.03,0.9) #axL.set_xlim(xlim); axL.set_ylim(ylim)
+
+    axE.loglog(rsc3_9_p, rsc3_9_eff, lw=2, c="purple",          zorder=20, label=r"exact $d=3$", ls="--")
+    axE.loglog(rsc3_3_p, rsc3_3_eff, lw=2, c="purple",          zorder=21, label=r"$3$-approx $d=3$")
+    axE.loglog(rsc5_5_p, rsc5_5_eff, lw=2, c="mediumslateblue", zorder=22, label=r"$5$-approx $d=5$")
+    axE.loglog(rsc5_4_p, rsc5_4_eff, lw=2, c="mediumslateblue", zorder=22, label=r"$4$-approx $d=5$", alpha=0.7, ls="-.")
+    axE.loglog(rsc5_3_p, rsc5_3_eff, lw=2, c="mediumslateblue", zorder=22, label=r"$3$-approx $d=5$", alpha=0.5, ls=":") 
+
+    axL.set_title(r"logical error probability $p'$")
+    axE.set_title("efficiency")
+    axL.set_xlabel(r"physical error rate $p$")
+    axE.set_xlabel(r"physical error rate $p$")
+    axL.grid(which='minor', linewidth=0.3, alpha=0.5)
+    axE.grid(which='minor', linewidth=0.3, alpha=0.5)
+    axE.set_ylim(0.9, None)
+    axL.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
 
 ### - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 
 
 if __name__ == "__main__":
-    monte_carlo_rsc()
-    #plot_ml()
+    plot_rsc_compare()
