@@ -4,7 +4,7 @@ Two files:
 
 - **`QEC.py`** — the library: quantum-error-correction primitives, the brute-force
   exact-fidelity pipeline, Monte-Carlo decoders, and the data/fit helpers. Import-only.
-- **`quantumshit.py`** *(a.k.a. `run.py` 😄)* — the runnable side: the experiment drivers
+- **`run.py`** — the runnable side: the experiment drivers
   and all the plots. Does `from QEC import *` and calls the library.
 
 Everything is stored as `numpy` arrays of **base-4 integer "tags"**: one integer encodes a
@@ -12,7 +12,7 @@ full n-qubit Pauli, two bits per qubit (`I=0, X=1, Z=2, Y=3`).
 
 ---
 
-## `QEC.py` (library)
+## `QEC.py`
 
 **Codes**
 - `QEC_code(name, stabilizers)` — builds generators + logical operators (`.X`, `.Z`) from a
@@ -45,11 +45,11 @@ per syndrome) → `get_new_proba` → `get_fidelity` / `get_logical_proba`. Plus
 
 ---
 
-## `quantumshit.py` (run.py)
+## `run.py`
 
 Experiment drivers and figures:
 
-- `single_brute_force()` — one exact run for one code/time; saves `bigassplot.png`
+- `single_brute_force()` — one exact run for one code/time;
   (errors→syndromes breakdown via `plot_errors_to_syndromes`).
 - `multiple_brute_force()` — sweep over noise strength; writes `saves_bf/{code}/…`.
 - `monte_carlo()` / `monte_carlo_rsc(d)` — MWPM Monte-Carlo sweep; writes `saves_mc/data_{d}.npy`.
@@ -60,7 +60,7 @@ Experiment drivers and figures:
 Pick a function in the `if __name__ == "__main__":` block and run:
 
 ```bash
-python quantumshit.py
+python run.py
 ```
 
 ---
