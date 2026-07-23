@@ -26,4 +26,5 @@ Estimates the **power and energy cost** of implementing a surface code on the SP
 
 ## Requirements
 Python with `numpy`, `scipy`, `matplotlib`, and `networkx`.
+
 README written by my good friend Claude :)
