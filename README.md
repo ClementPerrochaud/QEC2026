@@ -1,5 +1,3 @@
-# BBP
-
 Tools for modelling **quantum error correction (QEC) on a photonic quantum computer** — from the abstract decoding performance of stabilizer codes down to the real-world power and energy cost of running them on cryogenic photonic hardware.
 
 ## Files
